@@ -82,6 +82,7 @@ class ViewerApp implements Component {
     private statsDiv = document.createElement("div")
     private localTouchCursorDiv = document.createElement("div")
     private stream: Stream | null = null
+    private cachedStreamRect: DOMRect = new DOMRect()
 
     private inputConfig: StreamInputConfig = defaultStreamInputConfig()
     private previousMouseMode: MouseMode
@@ -151,8 +152,17 @@ class ViewerApp implements Component {
             }
         })
 
+        // Cache stream rect to avoid getBoundingClientRect on every mouse move
+        const invalidateRect = () => { this.cachedStreamRect = this.computeStreamRect() }
+        window.addEventListener("resize", invalidateRect)
+        // Also refresh on orientation change (mobile)
+        screen.orientation?.addEventListener("change", invalidateRect)
+
         document.addEventListener("pointerlockchange", this.onPointerLockChange.bind(this))
-        document.addEventListener("fullscreenchange", this.onFullscreenChange.bind(this))
+        document.addEventListener("fullscreenchange", () => {
+            this.onFullscreenChange()
+            invalidateRect()
+        })
 
         window.addEventListener("gamepadconnected", this.onGamepadConnect.bind(this))
         window.addEventListener("gamepaddisconnected", this.onGamepadDisconnect.bind(this))
@@ -170,7 +180,16 @@ class ViewerApp implements Component {
 
         element.addEventListener("mousedown", this.onMouseButtonDown.bind(this), { passive: false })
         element.addEventListener("mouseup", this.onMouseButtonUp.bind(this), { passive: false })
-        element.addEventListener("mousemove", this.onMouseMove.bind(this), { passive: false })
+
+        // Use pointerrawupdate for lowest-latency mouse tracking when available.
+        // It fires at hardware polling rate (up to 1000Hz) instead of being coalesced
+        // to ~60Hz like regular mousemove events.
+        if ('onpointerrawupdate' in window) {
+            (element as any).addEventListener('pointerrawupdate', this.onPointerRawUpdate.bind(this), { passive: false })
+        } else {
+            element.addEventListener("mousemove", this.onMouseMove.bind(this), { passive: false })
+        }
+
         element.addEventListener("wheel", this.onMouseWheel.bind(this), { passive: false })
         element.addEventListener("contextmenu", this.onContextMenu.bind(this), { passive: false })
 
@@ -210,6 +229,11 @@ class ViewerApp implements Component {
         this.stream.getInput().addScreenKeyboardVisibleEvent(this.onScreenKeyboardSetVisible.bind(this))
 
         this.stream.mount(this.div)
+
+        // Initialize cached rect once the video element is rendered
+        requestAnimationFrame(() => {
+            this.cachedStreamRect = this.computeStreamRect()
+        })
 
         if (this.autoEnterFullscreenOnStart) {
             this.pendingAutoFullscreenPrompt = true
@@ -270,7 +294,13 @@ class ViewerApp implements Component {
     onKeyDown(event: KeyboardEvent) {
         this.onUserInteraction()
 
-        console.debug(event)
+        // When screen keyboard is visible, let events flow through to the hidden input
+        // so InputEvent can be generated for text capture (critical for iOS)
+        if (this.sidebar.getScreenKeyboard().isVisible()) {
+            return
+        }
+
+
         if (event.shiftKey && event.ctrlKey && event.code == "KeyV") {
             // We are likely pasting -> don't send keys
         } else if (event.code == "F11") {
@@ -286,6 +316,11 @@ class ViewerApp implements Component {
     private isTogglingFullscreenWithKeybind: "waitForCtrl" | "makingFullscreen" | "none" = "none"
     onKeyUp(event: KeyboardEvent) {
         this.onUserInteraction()
+
+        // When screen keyboard is visible, let events flow through to the hidden input
+        if (this.sidebar.getScreenKeyboard().isVisible()) {
+            return
+        }
 
         event.preventDefault()
         this.stream?.getInput().onKeyUp(event)
@@ -340,6 +375,14 @@ class ViewerApp implements Component {
         event.preventDefault()
         this.stream?.getInput().onMouseMove(event, this.getStreamRect())
 
+        event.stopPropagation()
+    }
+    onPointerRawUpdate(event: PointerEvent) {
+        // pointerrawupdate fires at hardware rate — lowest latency path for mouse input.
+        // Only handle mouse pointer (not touch/pen which have their own handlers).
+        if (event.pointerType !== 'mouse') return
+        event.preventDefault()
+        this.stream?.getInput().onMouseMove(event, this.getStreamRect())
         event.stopPropagation()
     }
     onMouseWheel(event: WheelEvent) {
@@ -576,6 +619,14 @@ class ViewerApp implements Component {
     }
 
     getStreamRect(): DOMRect {
+        // Use cached rect if valid, otherwise compute live and update cache
+        if (this.cachedStreamRect.width > 0 && this.cachedStreamRect.height > 0) {
+            return this.cachedStreamRect
+        }
+        this.cachedStreamRect = this.computeStreamRect()
+        return this.cachedStreamRect
+    }
+    private computeStreamRect(): DOMRect {
         // The bounding rect of the videoElement or canvasElement can be bigger than the actual video
         // -> We need to correct for this when sending positions, else positions are wrong
         return this.stream?.getVideoRenderer()?.getStreamRect() ?? new DOMRect()

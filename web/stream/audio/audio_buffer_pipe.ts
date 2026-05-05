@@ -67,8 +67,8 @@ export class AudioBufferPipe implements PcmAudioPlayer {
             return
         }
 
-        const TARGET_LATENCY_SECS = 0.12
-        const MAX_LATENCY_SECS = 0.25
+        const TARGET_LATENCY_SECS = 0.04
+        const MAX_LATENCY_SECS = 0.10
 
         const now = this.base.getAudioContext().currentTime
 

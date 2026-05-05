@@ -37,6 +37,22 @@ body.stream {
     overscroll-behavior: none !important;
 }
 
+/* Lock stream page to initial viewport height — prevents iOS keyboard resize */
+html.stream {
+    height: var(--vh-initial, 100vh);
+    overflow: hidden;
+}
+body.stream {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: var(--vh-initial, 100vh);
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
+}
+
 h2,
 h3 {
     margin-top: 12px;
@@ -283,7 +299,7 @@ input[type=number] {
     left: 0;
     top: 0;
     width: 100vw;
-    height: 100vh;
+    height: var(--vh-initial, 100vh);
     background-color: rgba(0, 0, 0, 0.4);
     /** animation */
     visibility: visible;
@@ -914,12 +930,15 @@ input[type=number] {
     left: 50%;
     transform: translate(-50%, -50%);
     max-width: 100vw;
-    max-height: 100vh;
-    min-width: 100vmin;
-    min-height: 100vmin;
+    max-height: var(--vh-initial, 100vh);
+    min-width: 100vw;
+    min-height: var(--vh-initial, 100vh);
     width: auto;
     height: auto;
     outline: none;
+    /* GPU layer promotion for lower composite latency */
+    will-change: contents;
+    contain: layout style paint;
 }
 
 canvas.video-stream {
@@ -965,10 +984,22 @@ canvas.video-stream {
 }
 
 .hiddeninput {
-    position: absolute;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
     z-index: -1000;
+    border: none;
+    outline: none;
+    padding: 0;
+    margin: 0;
     resize: none;
-    translate: 200vw 200vh;
+    pointer-events: none;
+    /* iOS: prevent zoom on focus */
+    font-size: 16px;
+    transform: none;
 }
 
 /* Prevent starting animation for elements */
@@ -1140,7 +1171,7 @@ canvas.video-stream {
     /* Video stream: prevent overflow on portrait mobile */
     .video-stream {
         min-width: 100vw;
-        min-height: auto;
+        min-height: var(--vh-initial, 100vh);
     }
 
     /* Stats overlay: smaller text on mobile */

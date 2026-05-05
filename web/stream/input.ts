@@ -214,14 +214,7 @@ export class StreamInput {
 
         const modifiers = convertToModifiers(event)
 
-        if ("debug" in console) {
-            console.debug(
-                isDown ? "DOWN" : "UP",
-                event.code,
-                convertToKey(event),
-                convertToModifiers(event).toString(16)
-            )
-        }
+
         this.sendKey(isDown, key, modifiers)
     }
 
@@ -245,6 +238,7 @@ export class StreamInput {
         trySendChannel(this.keyboard, this.buffer)
     }
     sendText(text: string) {
+        this.buffer.reset()
         this.buffer.putU8(1)
 
         this.buffer.putU8(text.length)

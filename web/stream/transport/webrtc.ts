@@ -386,9 +386,8 @@ export class WebRTCTransport implements Transport {
         }
         const stats = await this.videoReceiver.getStats()
 
-        console.debug("----------------- raw video stats -----------------")
+
         for (const [key, value] of stats.entries()) {
-            console.debug("raw video stats", key, value)
 
             if ("decoderImplementation" in value && value.decoderImplementation != null) {
                 statsData.decoderImplementation = value.decoderImplementation
@@ -539,7 +538,6 @@ class WebRTCDataTransportChannel implements DataTransportChannel {
 
     private sendQueue: Array<ArrayBuffer> = []
     send(message: ArrayBuffer): void {
-        console.debug(this.label, message)
 
         if (!this.channel) {
             console.debug(`Failed to send message on channel ${this.label}`)

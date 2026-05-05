@@ -8,6 +8,18 @@
     <link rel="icon" href="resources/moonlight.svg" sizes="any" type="image/svg+xml">
 
     <link rel="stylesheet" href="styles/standard.css" id="style">
+    <script>
+        // Apply saved theme immediately to prevent flash of wrong theme.
+        // Module scripts (styles/index.js) are deferred, so we must do this inline.
+        try {
+            var s = JSON.parse(localStorage.getItem("mlSettings"));
+            var t = s && s.pageStyle;
+            if (t === "old") t = "moonlight";
+            if (t && t !== "standard") {
+                document.getElementById("style").href = "styles/" + t + ".css";
+            }
+        } catch(e) {}
+    </script>
     <script type="module" src="styles/index.js"></script>
 
     <script type="module" src="index.js" defer></script>

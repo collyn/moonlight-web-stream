@@ -9,6 +9,16 @@
     <link rel="icon" href="resources/moonlight.svg" sizes="any" type="image/svg+xml">
 
     <link rel="stylesheet" href="styles/standard.css" id="style">
+    <script>
+        try {
+            var s = JSON.parse(localStorage.getItem("mlSettings"));
+            var t = s && s.pageStyle;
+            if (t === "old") t = "moonlight";
+            if (t && t !== "standard") {
+                document.getElementById("style").href = "styles/" + t + ".css";
+            }
+        } catch(e) {}
+    </script>
     <script type="module" src="styles/index.js"></script>
 
     <script type="module" src="stream.js" defer></script>
@@ -24,6 +34,25 @@
             document.documentElement.translate = false;
             document.documentElement.classList.add("notranslate");
         } catch (_err) { }
+    </script>
+    <script>
+        // Lock the viewport height so iOS keyboard doesn't shrink the layout.
+        // Capture the initial full viewport height before any keyboard can change it.
+        (function() {
+            var ih = window.innerHeight;
+            document.documentElement.style.setProperty('--vh-initial', ih + 'px');
+
+            // When the visual viewport resizes (keyboard open/close), keep the page at
+            // original height and prevent scroll offset caused by keyboard focus.
+            if (window.visualViewport) {
+                window.visualViewport.addEventListener('resize', function() {
+                    window.scrollTo(0, 0);
+                });
+                window.visualViewport.addEventListener('scroll', function() {
+                    window.scrollTo(0, 0);
+                });
+            }
+        })();
     </script>
 </head>
 
