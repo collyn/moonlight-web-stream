@@ -238,13 +238,23 @@ export class StreamInput {
         trySendChannel(this.keyboard, this.buffer)
     }
     sendText(text: string) {
-        this.buffer.reset()
-        this.buffer.putU8(1)
+        // Encode the text to UTF-8 first to get the correct byte length
+        const encoder = new TextEncoder()
+        const utf8Bytes = encoder.encode(text)
 
-        this.buffer.putU8(text.length)
-        this.buffer.putUtf8Raw(text)
+        // Split into chunks that fit in a single U8 length (max 255 bytes)
+        for (let offset = 0; offset < utf8Bytes.length;) {
+            const chunkEnd = Math.min(offset + 255, utf8Bytes.length)
+            const chunkLength = chunkEnd - offset
 
-        trySendChannel(this.keyboard, this.buffer)
+            this.buffer.reset()
+            this.buffer.putU8(1)
+            this.buffer.putU8(chunkLength)
+            this.buffer.putU8Array(utf8Bytes.subarray(offset, chunkEnd))
+
+            trySendChannel(this.keyboard, this.buffer)
+            offset = chunkEnd
+        }
     }
 
     // -- Mouse

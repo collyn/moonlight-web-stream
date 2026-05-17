@@ -591,10 +591,109 @@ const VK_MAPPINGS: Record<string, number | null> = {
     // Fn: null,
 }
 
+// Mapping for event.key values (primarily for mobile keyboards where event.code is empty/Unidentified)
+export const KEY_VALUE_MAPPINGS: Record<string, number | null> = {
+    // Letters (lowercase and uppercase map to same VK code)
+    "a": StreamKeys.VK_KEY_A, "A": StreamKeys.VK_KEY_A,
+    "b": StreamKeys.VK_KEY_B, "B": StreamKeys.VK_KEY_B,
+    "c": StreamKeys.VK_KEY_C, "C": StreamKeys.VK_KEY_C,
+    "d": StreamKeys.VK_KEY_D, "D": StreamKeys.VK_KEY_D,
+    "e": StreamKeys.VK_KEY_E, "E": StreamKeys.VK_KEY_E,
+    "f": StreamKeys.VK_KEY_F, "F": StreamKeys.VK_KEY_F,
+    "g": StreamKeys.VK_KEY_G, "G": StreamKeys.VK_KEY_G,
+    "h": StreamKeys.VK_KEY_H, "H": StreamKeys.VK_KEY_H,
+    "i": StreamKeys.VK_KEY_I, "I": StreamKeys.VK_KEY_I,
+    "j": StreamKeys.VK_KEY_J, "J": StreamKeys.VK_KEY_J,
+    "k": StreamKeys.VK_KEY_K, "K": StreamKeys.VK_KEY_K,
+    "l": StreamKeys.VK_KEY_L, "L": StreamKeys.VK_KEY_L,
+    "m": StreamKeys.VK_KEY_M, "M": StreamKeys.VK_KEY_M,
+    "n": StreamKeys.VK_KEY_N, "N": StreamKeys.VK_KEY_N,
+    "o": StreamKeys.VK_KEY_O, "O": StreamKeys.VK_KEY_O,
+    "p": StreamKeys.VK_KEY_P, "P": StreamKeys.VK_KEY_P,
+    "q": StreamKeys.VK_KEY_Q, "Q": StreamKeys.VK_KEY_Q,
+    "r": StreamKeys.VK_KEY_R, "R": StreamKeys.VK_KEY_R,
+    "s": StreamKeys.VK_KEY_S, "S": StreamKeys.VK_KEY_S,
+    "t": StreamKeys.VK_KEY_T, "T": StreamKeys.VK_KEY_T,
+    "u": StreamKeys.VK_KEY_U, "U": StreamKeys.VK_KEY_U,
+    "v": StreamKeys.VK_KEY_V, "V": StreamKeys.VK_KEY_V,
+    "w": StreamKeys.VK_KEY_W, "W": StreamKeys.VK_KEY_W,
+    "x": StreamKeys.VK_KEY_X, "X": StreamKeys.VK_KEY_X,
+    "y": StreamKeys.VK_KEY_Y, "Y": StreamKeys.VK_KEY_Y,
+    "z": StreamKeys.VK_KEY_Z, "Z": StreamKeys.VK_KEY_Z,
+    // Digits
+    "0": StreamKeys.VK_KEY_0, "1": StreamKeys.VK_KEY_1,
+    "2": StreamKeys.VK_KEY_2, "3": StreamKeys.VK_KEY_3,
+    "4": StreamKeys.VK_KEY_4, "5": StreamKeys.VK_KEY_5,
+    "6": StreamKeys.VK_KEY_6, "7": StreamKeys.VK_KEY_7,
+    "8": StreamKeys.VK_KEY_8, "9": StreamKeys.VK_KEY_9,
+    // Symbols / punctuation (unshifted)
+    " ": StreamKeys.VK_SPACE,
+    ";": StreamKeys.VK_OEM_1, ":": StreamKeys.VK_OEM_1,
+    "=": StreamKeys.VK_OEM_PLUS, "+": StreamKeys.VK_OEM_PLUS,
+    ",": StreamKeys.VK_OEM_COMMA, "<": StreamKeys.VK_OEM_COMMA,
+    "-": StreamKeys.VK_OEM_MINUS, "_": StreamKeys.VK_OEM_MINUS,
+    ".": StreamKeys.VK_OEM_PERIOD, ">": StreamKeys.VK_OEM_PERIOD,
+    "/": StreamKeys.VK_OEM_2, "?": StreamKeys.VK_OEM_2,
+    "`": StreamKeys.VK_OEM_3, "~": StreamKeys.VK_OEM_3,
+    "[": StreamKeys.VK_OEM_4, "{": StreamKeys.VK_OEM_4,
+    "\\": StreamKeys.VK_OEM_5, "|": StreamKeys.VK_OEM_5,
+    "]": StreamKeys.VK_OEM_6, "}": StreamKeys.VK_OEM_6,
+    "'": StreamKeys.VK_OEM_7, "\"": StreamKeys.VK_OEM_7,
+    // Shifted digit symbols (US layout: Shift+1=!, Shift+2=@, etc.)
+    "!": StreamKeys.VK_KEY_1,
+    "@": StreamKeys.VK_KEY_2,
+    "#": StreamKeys.VK_KEY_3,
+    "$": StreamKeys.VK_KEY_4,
+    "%": StreamKeys.VK_KEY_5,
+    "^": StreamKeys.VK_KEY_6,
+    "&": StreamKeys.VK_KEY_7,
+    "*": StreamKeys.VK_KEY_8,
+    "(": StreamKeys.VK_KEY_9,
+    ")": StreamKeys.VK_KEY_0,
+    // Named keys (event.key values)
+    "Backspace": StreamKeys.VK_BACK,
+    "Tab": StreamKeys.VK_TAB,
+    "Enter": StreamKeys.VK_RETURN,
+    "Escape": StreamKeys.VK_ESCAPE,
+    "Delete": StreamKeys.VK_DELETE,
+    "ArrowLeft": StreamKeys.VK_LEFT,
+    "ArrowRight": StreamKeys.VK_RIGHT,
+    "ArrowUp": StreamKeys.VK_UP,
+    "ArrowDown": StreamKeys.VK_DOWN,
+    "Home": StreamKeys.VK_HOME,
+    "End": StreamKeys.VK_END,
+    "PageUp": StreamKeys.VK_PRIOR,
+    "PageDown": StreamKeys.VK_NEXT,
+    "Insert": StreamKeys.VK_INSERT,
+    "CapsLock": StreamKeys.VK_CAPITAL,
+    "Shift": StreamKeys.VK_SHIFT,
+    "Control": StreamKeys.VK_CONTROL,
+    "Alt": StreamKeys.VK_MENU,
+    "Meta": StreamKeys.VK_LWIN,
+    // Explicitly ignore IME-related keys
+    "Process": null,
+    "Unidentified": null,
+    "Dead": null,
+}
+
+// Characters that require Shift modifier on a US keyboard layout
+export const SHIFT_CHARS = new Set([
+    "A","B","C","D","E","F","G","H","I","J","K","L","M",
+    "N","O","P","Q","R","S","T","U","V","W","X","Y","Z",
+    "!","@","#","$","%","^","&","*","(",")",
+    "_","+","{","}","|",":",'"',"<",">","?","~",
+])
+
 export function convertToKey(event: KeyboardEvent): number | null {
+    // First try event.code (most reliable on desktop)
     let key = VK_MAPPINGS[event.code] ?? null
     if (key == null) {
+        // Fallback: try event.key in the code-style mappings (for named keys like "Escape", "Home")
         key = VK_MAPPINGS[event.key] ?? null
+    }
+    if (key == null) {
+        // Fallback: try event.key in the character/value mappings (for mobile keyboards)
+        key = KEY_VALUE_MAPPINGS[event.key] ?? null
     }
     return key
 }

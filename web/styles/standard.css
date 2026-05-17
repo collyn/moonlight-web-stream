@@ -1331,16 +1331,24 @@ input[type=number] {
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    max-width: 100vw;
-    max-height: var(--vh-initial, 100vh);
-    min-width: 100vw;
-    min-height: var(--vh-initial, 100vh);
-    width: auto;
-    height: auto;
+    width: 100vw;
+    /* Use --vh-initial (JS-managed, orientation-aware) with svh fallback */
+    height: 100svh;
+    height: var(--vh-initial, 100svh);
     outline: none;
+    object-fit: contain;
     /* GPU layer promotion for lower composite latency */
     will-change: contents;
     contain: layout style paint;
+    /* Smooth transition when keyboard opens/closes */
+    transition: height 0.2s ease, top 0.2s ease, transform 0.2s ease;
+}
+
+/* When mobile virtual keyboard is open, shrink video to fit above keyboard */
+body.keyboard-active .video-stream {
+    top: 0;
+    transform: translate(-50%, 0);
+    height: var(--visible-vh, 50vh);
 }
 
 canvas.video-stream {
@@ -1572,10 +1580,11 @@ canvas.video-stream {
         font-size: 0.75rem;
     }
 
-    /* Video stream: prevent overflow on portrait mobile */
+    /* Video stream: proper fit on mobile — use JS-managed vh for orientation changes */
     .video-stream {
-        min-width: 100vw;
-        min-height: var(--vh-initial, 100vh);
+        width: 100vw;
+        height: 100svh;
+        height: var(--vh-initial, 100svh);
     }
 
     /* Stats overlay: smaller text on mobile */

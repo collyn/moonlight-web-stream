@@ -172,7 +172,50 @@ class ViewerApp implements Component {
                 this.onGamepadAdd(gamepad)
             }
         }
+
+        // Mobile keyboard viewport adjustment
+        // When the iOS/Android virtual keyboard opens, shrink the video
+        // to fit above the keyboard so the user can see what they're typing
+        if (window.visualViewport) {
+            this.setupKeyboardViewportAdjustment()
+        }
     }
+
+    /**
+     * Listens to visualViewport changes to detect when the virtual keyboard
+     * opens/closes, and adjusts the video stream to fit above the keyboard.
+     */
+    private setupKeyboardViewportAdjustment() {
+        const vv = window.visualViewport!
+        const initialHeight = window.innerHeight
+
+        const onViewportResize = () => {
+            const screenKeyboard = this.sidebar.getScreenKeyboard()
+
+            // Detect keyboard: viewport significantly shorter than initial window height
+            const keyboardThreshold = initialHeight * 0.75
+            const isKeyboardOpen = screenKeyboard.isVisible() && vv.height < keyboardThreshold
+
+            if (isKeyboardOpen) {
+                // Shrink video to fit in the visible area above the keyboard
+                document.documentElement.style.setProperty('--visible-vh', vv.height + 'px')
+                document.body.classList.add('keyboard-active')
+            } else {
+                document.body.classList.remove('keyboard-active')
+                document.documentElement.style.removeProperty('--visible-vh')
+            }
+
+            // Always prevent scroll offset caused by keyboard focus
+            window.scrollTo(0, 0)
+
+            // Invalidate cached stream rect since video size changed
+            this.cachedStreamRect = this.computeStreamRect()
+        }
+
+        vv.addEventListener('resize', onViewportResize)
+        vv.addEventListener('scroll', () => window.scrollTo(0, 0))
+    }
+
     private addListeners(element: GlobalEventHandlers) {
         element.addEventListener("keydown", this.onKeyDown.bind(this), { passive: false })
         element.addEventListener("keyup", this.onKeyUp.bind(this), { passive: false })

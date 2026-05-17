@@ -1,4 +1,6 @@
 
+import { KEY_VALUE_MAPPINGS, SHIFT_CHARS } from "./stream/keyboard.js"
+
 export type TextEvent = CustomEvent<{ text: string }>
 
 export class ScreenKeyboard {
@@ -86,15 +88,60 @@ export class ScreenKeyboard {
         this.eventTarget.addEventListener("ml-text", listener as any)
     }
 
+    /**
+     * Try to convert a text character to keydown/keyup events.
+     * This is critical for Linux remotes where sendText() uses the GTK Unicode
+     * input method (Ctrl+Shift+U + hex), which produces "U+" garbage.
+     * By sending key events instead, the server uses proper X11 keysyms.
+     *
+     * Returns true if ALL characters were converted to key events.
+     * Returns false if any character couldn't be mapped (caller should use sendText fallback).
+     */
+    private tryDispatchAsKeyEvents(text: string): boolean {
+        // For each character, check if it has a VK mapping
+        for (const char of text) {
+            const vkCode = KEY_VALUE_MAPPINGS[char]
+            if (vkCode == null || vkCode === undefined) {
+                // This character can't be mapped to a key event
+                return false
+            }
+        }
+
+        // All characters are mappable — dispatch key events for each
+        for (const char of text) {
+            const needsShift = SHIFT_CHARS.has(char)
+
+            const keyDown = new KeyboardEvent("keydown", {
+                key: char,
+                code: "",
+                shiftKey: needsShift,
+            })
+            const keyUp = new KeyboardEvent("keyup", {
+                key: char,
+                code: "",
+                shiftKey: needsShift,
+            })
+
+            this.eventTarget.dispatchEvent(keyDown)
+            this.eventTarget.dispatchEvent(keyUp)
+        }
+
+        return true
+    }
+
     // -- Events
     private onCompositionEnd(event: CompositionEvent) {
         // iOS IME: when predictive text or accent characters are committed,
         // the compositionend event carries the final text
         if (event.data) {
-            const customEvent: TextEvent = new CustomEvent("ml-text", {
-                detail: { text: event.data }
-            })
-            this.eventTarget.dispatchEvent(customEvent)
+            // Try to send as key events first (works better on Linux remotes)
+            if (!this.tryDispatchAsKeyEvents(event.data)) {
+                // Fallback to sendText for characters that can't be mapped
+                const customEvent: TextEvent = new CustomEvent("ml-text", {
+                    detail: { text: event.data }
+                })
+                this.eventTarget.dispatchEvent(customEvent)
+            }
         }
 
         // Repopulate the input so that the deleteContent commands will work
@@ -110,12 +157,16 @@ export class ScreenKeyboard {
             return
         }
 
-        if ((event.inputType == "insertText" || event.inputType == "insertFromPaste") && event.data != null) {
-            const customEvent: TextEvent = new CustomEvent("ml-text", {
-                detail: { text: event.data }
-            })
-
-            this.eventTarget.dispatchEvent(customEvent)
+        if ((event.inputType == "insertText" || event.inputType == "insertFromPaste" || event.inputType == "insertCompositionText" || event.inputType == "insertReplacementText") && event.data != null) {
+            // Try to send as key events first (works better on Linux remotes)
+            // sendText() on Linux uses Ctrl+Shift+U Unicode input which shows "U+" garbage
+            if (!this.tryDispatchAsKeyEvents(event.data)) {
+                // Fallback to sendText for characters that can't be mapped (e.g., emoji, CJK)
+                const customEvent: TextEvent = new CustomEvent("ml-text", {
+                    detail: { text: event.data }
+                })
+                this.eventTarget.dispatchEvent(customEvent)
+            }
         } else if (event.inputType == "deleteContentBackward" || event.inputType == "deleteByCut") {
             const keyDown = new KeyboardEvent("keydown", {
                 code: "Backspace"

@@ -36,11 +36,40 @@
         } catch (_err) { }
     </script>
     <script>
-        // Lock the viewport height so iOS keyboard doesn't shrink the layout.
-        // Capture the initial full viewport height before any keyboard can change it.
+        // Track viewport dimensions, updating on orientation change but
+        // NOT when the iOS keyboard opens/closes (which also triggers resize).
         (function() {
-            var ih = window.innerHeight;
-            document.documentElement.style.setProperty('--vh-initial', ih + 'px');
+            var lastWidth = window.innerWidth;
+
+            function updateVh() {
+                var ih = window.innerHeight;
+                document.documentElement.style.setProperty('--vh-initial', ih + 'px');
+            }
+
+            // Set initial values
+            updateVh();
+
+            // Update on orientation change (rotation)
+            if (screen.orientation) {
+                screen.orientation.addEventListener('change', function() {
+                    // Delay slightly for iOS to finish the rotation animation
+                    setTimeout(updateVh, 100);
+                });
+            }
+            // Fallback for older iOS
+            window.addEventListener('orientationchange', function() {
+                setTimeout(updateVh, 200);
+            });
+
+            // Also update on window resize, but only if width changed
+            // (keyboard open/close only changes height, not width)
+            window.addEventListener('resize', function() {
+                var newWidth = window.innerWidth;
+                if (newWidth !== lastWidth) {
+                    lastWidth = newWidth;
+                    updateVh();
+                }
+            });
 
             // When the visual viewport resizes (keyboard open/close), keep the page at
             // original height and prevent scroll offset caused by keyboard focus.
