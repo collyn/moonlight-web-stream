@@ -95,6 +95,7 @@ export const en = {
         toggleFullscreenWithKeybind: "Toggle Fullscreen and Mouse Lock with Ctrl + Shift + I",
         style: "Style",
         useCustomDropdown: "Use Custom Dropdown Implementation",
+        hideRemoteCursor: "Hide Remote Cursor (Ctrl+Alt+Shift+N)",
     },
     addHost: {
         header: "Host",

@@ -97,6 +97,7 @@ export const frFr: Translations = {
         toggleFullscreenWithKeybind: "Basculer entre le mode plein écran et le verrouillage de la souris avec Ctrl + Shift + I",
         style: "Style",
         useCustomDropdown: "Utiliser l'implémentation personnalisée du déroulement",
+        hideRemoteCursor: "Masquer le curseur distant (Ctrl+Alt+Shift+N)",
     },
     addHost: {
         header: "Hôte",

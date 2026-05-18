@@ -97,6 +97,7 @@ export const ptBR: Translations = {
         toggleFullscreenWithKeybind: "Alternar Tela Cheia e Bloqueio do Mouse com Ctrl + Shift + I",
         style: "Estilo",
         useCustomDropdown: "Usar Implementação de Dropdown Personalizada",
+        hideRemoteCursor: "Ocultar cursor remoto (Ctrl+Alt+Shift+N)",
     },
     addHost: {
         header: "Host",

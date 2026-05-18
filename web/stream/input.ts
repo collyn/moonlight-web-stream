@@ -78,6 +78,7 @@ export type StreamInputConfig = {
     touchMode: TouchMode
     localCursorSensitivity: number
     controllerConfig: ControllerConfig
+    hideRemoteCursor: boolean
 }
 
 export function defaultStreamInputConfig(): StreamInputConfig {
@@ -90,7 +91,8 @@ export function defaultStreamInputConfig(): StreamInputConfig {
             invertAB: false,
             invertXY: false,
             sendIntervalOverride: null
-        }
+        },
+        hideRemoteCursor: false
     }
 }
 
@@ -323,7 +325,8 @@ export class StreamInput {
         if (this.config.mouseMode == "relative") {
             this.sendMouseMoveClientCoordinates(event.movementX, event.movementY, rect)
         } else if (this.config.mouseMode == "rawInput") {
-            this.sendRawMouseMoveClientCoordinates(event.movementX, event.movementY, event.clientX, event.clientY, rect)
+            // rawInput mode mouse movement is handled by onRawPredictionMove called directly from stream.ts
+            // because stream.ts owns the local prediction cursor state.
         } else if (this.config.mouseMode == "follow") {
             this.sendMousePositionClientCoordinates(event.clientX, event.clientY, rect, false)
         } else if (this.config.mouseMode == "localCursor") {
@@ -358,67 +361,14 @@ export class StreamInput {
 
         trySendChannel(this.mouseRelative, this.buffer)
     }
-    private rawVirtualX: number = -1
-    private rawVirtualY: number = -1
-
-    resetRawVirtualCursor() {
-        this.rawVirtualX = -1
-        this.rawVirtualY = -1
-    }
-
-    sendRawMouseMoveClientCoordinates(movementX: number, movementY: number, clientX: number, clientY: number, rect: DOMRect) {
-        // If Pointer Lock is NOT active, the local OS cursor is visible. 
-        // To make the remote cursor PERFECTLY OVERLAP the local cursor (like Follow mode),
-        // we must use the exact absolute coordinates (clientX/clientY).
-        if (!document.pointerLockElement) {
-            const relativeX = clientX - rect.x
-            const relativeY = clientY - rect.y
-            this.rawVirtualX = relativeX / rect.width * this.streamerSize[0]
-            this.rawVirtualY = relativeY / rect.height * this.streamerSize[1]
-        } else {
-            // If Pointer Lock IS active, the local cursor is hidden, and clientX/clientY are frozen.
-            // We must use movementX/Y (which contains raw hardware mickeys due to unadjustedMovement: true).
-            const scaledMovement = this.scaleMouseMoveClientCoordinates(movementX, movementY, rect)
-            if (!scaledMovement) {
-                return
-            }
-
-            if (this.rawVirtualX === -1) {
-                const relativeX = clientX - rect.x
-                const relativeY = clientY - rect.y
-                this.rawVirtualX = relativeX / rect.width * this.streamerSize[0]
-                this.rawVirtualY = relativeY / rect.height * this.streamerSize[1]
-            }
-
-            this.rawVirtualX += scaledMovement[0] * this.config.localCursorSensitivity
-            this.rawVirtualY += scaledMovement[1] * this.config.localCursorSensitivity
+    onRawPredictionMove(x: number, y: number, rect: DOMRect) {
+        if (this.config.mouseMode == "rawInput") {
+            // Treat the prediction cursor coordinates exactly like follow mode treats clientX/Y.
+            // This ensures the remote cursor aligns perfectly with the visual local cursor.
+            // We use the absolute reliable channel or just absolute channel (reliable=false).
+            // false avoids TCP stalling if a packet is dropped, which is better for smooth motion.
+            this.sendMousePositionClientCoordinates(x, y, rect, false)
         }
-
-        // Clamp virtual cursor to screen bounds
-        this.rawVirtualX = Math.max(0, Math.min(this.streamerSize[0], this.rawVirtualX))
-        this.rawVirtualY = Math.max(0, Math.min(this.streamerSize[1], this.rawVirtualY))
-
-        this.sendRawMousePosition(Math.round(this.rawVirtualX), Math.round(this.rawVirtualY))
-    }
-
-    sendRawMousePosition(x: number, y: number) {
-        const PACKET_SIZE = 1 + 2 + 2 + 2 + 2;
-
-        const estimatedBufferedBytes = this.mouseRaw?.estimatedBufferedBytes()
-        if (this.mouseRaw && estimatedBufferedBytes != null && estimatedBufferedBytes > PACKET_SIZE) {
-            // Because we are sending absolute coordinates, it is perfectly safe to drop packets.
-            // The next packet will contain the latest absolute position.
-            return
-        }
-
-        this.buffer.reset()
-        this.buffer.putU8(1) // type 1 = MousePosition
-        this.buffer.putI16(x)
-        this.buffer.putI16(y)
-        this.buffer.putI16(this.streamerSize[0])
-        this.buffer.putI16(this.streamerSize[1])
-
-        trySendChannel(this.mouseRaw, this.buffer)
     }
     sendMouseMoveClientCoordinates(movementX: number, movementY: number, rect: DOMRect) {
         const scaledMovement = this.scaleMouseMoveClientCoordinates(movementX, movementY, rect)
@@ -452,6 +402,39 @@ export class StreamInput {
             movementX / rect.width * this.streamerSize[0],
             movementY / rect.height * this.streamerSize[1],
         ]
+    }
+
+    /**
+     * Compute the per-pixel scale factors from screen pixels → server resolution,
+     * taking letterboxing into account.
+     *
+     * When the video has a different aspect ratio than the container, the browser
+     * adds black bars (object-fit: contain). The actual rendered video region is
+     * smaller than rect, so raw movementX/Y must be scaled by
+     * serverRes / renderedVideoPixels, not serverRes / containerPixels.
+     */
+    private getRawMovementScale(rect: DOMRect): [number, number] {
+        const [sw, sh] = this.streamerSize
+        if (sw <= 0 || sh <= 0 || rect.width <= 0 || rect.height <= 0) {
+            return [0, 0]
+        }
+
+        // Compute actual rendered video dimensions (letter/pillar-box aware)
+        const containerAspect = rect.width / rect.height
+        const serverAspect = sw / sh
+
+        let videoW: number, videoH: number
+        if (serverAspect > containerAspect) {
+            // Pillarboxed: width fills container, height is limited
+            videoW = rect.width
+            videoH = rect.width / serverAspect
+        } else {
+            // Letterboxed: height fills container, width is limited
+            videoH = rect.height
+            videoW = rect.height * serverAspect
+        }
+
+        return [sw / videoW, sh / videoH]
     }
     sendMousePosition(x: number, y: number, referenceWidth: number, referenceHeight: number, reliable: boolean) {
         this.buffer.reset()

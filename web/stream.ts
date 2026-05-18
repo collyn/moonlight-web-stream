@@ -7,8 +7,8 @@ import { getModalBackground, Modal, showMessage, showModal } from "./component/m
 import { getSidebarRoot, setSidebar, setSidebarExtended, setSidebarStyle, Sidebar } from "./component/sidebar/index.js";
 import { defaultStreamInputConfig, MouseMode, ScreenKeyboardSetVisibleEvent, StreamInputConfig } from "./stream/input.js";
 import { getLocalStreamSettings, Settings } from "./component/settings_menu.js";
-import { SelectComponent } from "./component/input.js";
-import { DetailedRole, LogMessageType, StreamCapabilities, StreamKeys, StreamPermissions } from "./api_bindings.js";
+import { InputComponent, SelectComponent } from "./component/input.js";
+import { DetailedRole, LogMessageType, StreamCapabilities, StreamKeyModifiers, StreamKeys, StreamPermissions } from "./api_bindings.js";
 import { ScreenKeyboard, TextEvent } from "./screen_keyboard.js";
 import { FormModal } from "./component/modal/form.js";
 import { streamStatsToText } from "./stream/stats.js";
@@ -81,6 +81,22 @@ class ViewerApp implements Component {
 
     private statsDiv = document.createElement("div")
     private localTouchCursorDiv = document.createElement("div")
+    // Prediction cursor: shown only when pointer-locked in rawInput mode.
+    // Moves at hardware pointerrawupdate rate (0ms latency), acting as the
+    // "leader" cursor while the video cursor lags ~50ms behind.
+    private rawPredictionCursorDiv = document.createElement("div")
+    private rawPredictionX = -1
+    private rawPredictionY = -1
+    // Last known OS cursor position BEFORE pointer lock activates.
+    // Used to initialize the prediction cursor at the exact same position as the
+    // remote cursor, so clicks register at the right place.
+    private lastKnownMouseX = 0
+    private lastKnownMouseY = 0
+    // Global style element to force-hide the OS cursor in rawInput mode.
+    private cursorHideStyleEl: HTMLStyleElement | null = null
+    // Tracks whether we've asked Sunshine to hide its video cursor (via Ctrl+Alt+Shift+N).
+    // Used to avoid sending a redundant second toggle that would re-show the cursor.
+    private sunshineHideCursor = false
     private stream: Stream | null = null
     private cachedStreamRect: DOMRect = new DOMRect()
 
@@ -102,7 +118,8 @@ class ViewerApp implements Component {
             mouseScrollMode: settings.mouseScrollMode,
             touchMode: settings.touchMode,
             localCursorSensitivity: settings.localCursorSensitivity,
-            controllerConfig: settings.controllerConfig
+            controllerConfig: settings.controllerConfig,
+            hideRemoteCursor: settings.hideRemoteCursor
         })
 
         // Configure sidebar
@@ -114,6 +131,12 @@ class ViewerApp implements Component {
         this.statsDiv.classList.add("video-stats")
         this.localTouchCursorDiv.hidden = true
         this.localTouchCursorDiv.classList.add("local-touch-cursor")
+
+        // Prediction cursor overlay — must be on document.body (not this.div)
+        // so it is never clipped or affected by stacking contexts in fullscreen.
+        this.rawPredictionCursorDiv.hidden = true
+        this.rawPredictionCursorDiv.classList.add("raw-prediction-cursor")
+        document.body.appendChild(this.rawPredictionCursorDiv)
 
         setInterval(() => {
             // Update stats display every 100ms
@@ -129,6 +152,7 @@ class ViewerApp implements Component {
         }, 100)
         this.div.appendChild(this.statsDiv)
         this.div.appendChild(this.localTouchCursorDiv)
+        // rawPredictionCursorDiv is on document.body, not this.div
 
         // Configure stream
         this.previousMouseMode = this.inputConfig.mouseMode
@@ -291,6 +315,7 @@ class ViewerApp implements Component {
             document.title = `Stream: ${app.title}`
         } else if (data.type == "connectionComplete") {
             this.sidebar.onCapabilitiesChange(data.capabilities)
+            this.sendSunshineCursorHide(this.inputConfig.hideRemoteCursor)
         }
     }
 
@@ -326,16 +351,12 @@ class ViewerApp implements Component {
         return this.inputConfig
     }
     setInputConfig(config: StreamInputConfig) {
-        Object.assign(this.inputConfig, config)
-
-        this.stream?.getInput().setConfig(this.inputConfig)
+        this.inputConfig = config
+        this.stream?.getInput().setConfig(config)
         this.renderLocalTouchCursor()
 
-        if (this.inputConfig.mouseMode === "rawInput") {
-            this.div.style.cursor = "none"
-        } else {
-            this.div.style.cursor = ""
-        }
+        this.sendSunshineCursorHide(this.inputConfig.hideRemoteCursor)
+        this.updateGlobalCursorHide(this.inputConfig.mouseMode === "rawInput")
     }
 
     // Keyboard
@@ -420,6 +441,12 @@ class ViewerApp implements Component {
         event.stopPropagation()
     }
     onMouseMove(event: MouseEvent) {
+        // Always capture real mouse position while not in pointer lock
+        if (!document.pointerLockElement) {
+            this.lastKnownMouseX = event.clientX
+            this.lastKnownMouseY = event.clientY
+        }
+
         if (this.inputConfig.mouseMode == "rawInput" && "PointerEvent" in window) {
             event.preventDefault()
             event.stopPropagation()
@@ -432,34 +459,87 @@ class ViewerApp implements Component {
         event.stopPropagation()
     }
     onPointerMove(event: PointerEvent) {
+        if (event.pointerType === 'mouse' && !document.pointerLockElement) {
+            // Track real cursor position before pointer lock for accurate cursor init
+            this.lastKnownMouseX = event.clientX
+            this.lastKnownMouseY = event.clientY
+        }
+
         if (this.inputConfig.mouseMode != "rawInput") {
             return
         }
         if (event.pointerType !== 'mouse') {
             return
         }
-        if (performance.now() - this.lastPointerRawUpdateMs < 100) {
-            event.preventDefault()
-            event.stopPropagation()
-            return
-        }
 
         event.preventDefault()
-        this.sendPointerMoveEvents(event)
+
+        const rawUpdatedRecently = performance.now() - this.lastPointerRawUpdateMs < 100
+
+        // Always update the local prediction cursor from pointermove.
+        if (!rawUpdatedRecently) {
+            this.updateRawPredictionCursor(event)
+            // Send the updated prediction cursor position to the remote
+            this.stream?.getInput().onRawPredictionMove(this.rawPredictionX, this.rawPredictionY, this.getStreamRect())
+        }
+
         event.stopPropagation()
     }
     onPointerRawUpdate(event: PointerEvent) {
         if (this.inputConfig.mouseMode != "rawInput") {
             return
         }
-
-        // pointerrawupdate fires at hardware rate: lowest latency path for mouse input.
-        // Only handle mouse pointer (not touch/pen which have their own handlers).
         if (event.pointerType !== 'mouse') return
         this.lastPointerRawUpdateMs = performance.now()
         event.preventDefault()
-        this.stream?.getInput().onMouseMove(event, this.getStreamRect())
+
+        const rect = this.getStreamRect()
+        this.updateRawPredictionCursor(event)
+        this.stream?.getInput().onRawPredictionMove(this.rawPredictionX, this.rawPredictionY, rect)
+
         event.stopPropagation()
+    }
+
+    /**
+     * Update the prediction cursor position at hardware rate (pointerrawupdate).
+     * Only active when pointer lock is on — at that point the OS cursor is hidden
+     * and this becomes the primary visual cursor (0ms latency).
+     * The video cursor underneath will lag ~50ms but eyes naturally track the
+     * local leader cursor, giving a smooth feel identical to Parsec/native clients.
+     */
+    private updateRawPredictionCursor(event: PointerEvent) {
+        if (!document.pointerLockElement) {
+            // Pointer lock off → OS cursor is visible, hide prediction cursor
+            this.rawPredictionCursorDiv.hidden = true
+            // Update coordinates to actual mouse position so we still send
+            // correct absolute coordinates to the remote host.
+            this.rawPredictionX = event.clientX
+            this.rawPredictionY = event.clientY
+            return
+        }
+
+        // Always use viewport dimensions as the cursor movement bounds.
+        // The stream rect from getStreamRect() can return (0,0,0,0) in fullscreen
+        // before the video renderer reports its layout — causing the cursor to be
+        // clamped to (0,0) and appear frozen.
+        const W = window.innerWidth
+        const H = window.innerHeight
+
+        if (this.rawPredictionX < 0) {
+            this.rawPredictionX = W / 2
+            this.rawPredictionY = H / 2
+        }
+        this.rawPredictionX = Math.max(0, Math.min(W, this.rawPredictionX + event.movementX))
+        this.rawPredictionY = Math.max(0, Math.min(H, this.rawPredictionY + event.movementY))
+
+        this.placePredictionCursor(this.rawPredictionX, this.rawPredictionY)
+    }
+
+    /** Position and show the prediction cursor div at screen coordinates (x, y). */
+    private placePredictionCursor(x: number, y: number) {
+        this.rawPredictionCursorDiv.style.left = `${x}px`
+        this.rawPredictionCursorDiv.style.top  = `${y}px`
+        this.rawPredictionCursorDiv.hidden = false
     }
     private sendPointerMoveEvents(event: PointerEvent) {
         const rect = this.getStreamRect()
@@ -667,11 +747,80 @@ class ViewerApp implements Component {
     private onPointerLockChange() {
         this.checkFullyImmersed()
 
+        const isRawInput = this.inputConfig.mouseMode === "rawInput" ||
+            this.previousMouseMode === "rawInput"
+
         if (!document.pointerLockElement) {
             this.inputConfig.mouseMode = this.previousMouseMode
             this.setInputConfig(this.inputConfig)
-            this.stream?.getInput().resetRawVirtualCursor()
+            // Hide prediction cursor and reset its position when lock is released
+            this.rawPredictionCursorDiv.hidden = true
+            this.rawPredictionX = -1
+            this.rawPredictionY = -1
+
+            // Restore cursor in video when exiting rawInput
+            if (isRawInput) {
+                this.sendSunshineCursorHide(false)
+            }
+        } else {
+            // Hide cursor in video when entering rawInput pointer lock
+            if (this.inputConfig.mouseMode === "rawInput") {
+                // Initialize the local prediction cursor at the center of the viewport.
+                // We MUST use the exact center and immediately send this absolute position
+                // to the remote host. This forces the remote OS cursor to teleport to the
+                // exact same position as our local prediction cursor, guaranteeing 100% sync.
+                // Using lastKnownMouseX is dangerous because window.innerWidth changes during fullscreen transition.
+                const startX = window.innerWidth  / 2
+                const startY = window.innerHeight / 2
+                this.rawPredictionX = startX
+                this.rawPredictionY = startY
+                this.placePredictionCursor(startX, startY)
+                
+                // Immediately synchronize the remote cursor to the new starting position
+                this.stream?.getInput().onRawPredictionMove(startX, startY, this.getStreamRect())
+            }
         }
+
+        // Re-evaluate cursor hide whenever lock state changes.
+        this.updateGlobalCursorHide(this.inputConfig.mouseMode === "rawInput")
+    }
+
+    /**
+     * Toggle Sunshine's cursor-in-video rendering by sending the Ctrl+Alt+Shift+N shortcut.
+     *
+     * Sunshine tracks modifier state via ACTUAL key press events (VK_LCONTROL, VK_LMENU, VK_LSHIFT).
+     * It checks: shortcutFlags == SHORTCUT (CTRL|ALT|SHIFT) && keyCode == N → toggle display_cursor.
+     *
+     * We MUST send the modifier keys as real key events, NOT just as a modifier bitmask.
+     *
+     * @param hide true = hide cursor from video, false = restore cursor in video
+     */
+    private sendSunshineCursorHide(hide: boolean) {
+        // Idempotent: don't send if already in the desired state
+        if (hide === this.sunshineHideCursor) return
+
+        const input = this.stream?.getInput()
+        if (!input) return
+
+        const CTRL_MOD  = StreamKeyModifiers.MASK_CTRL
+        const CA_MOD    = StreamKeyModifiers.MASK_CTRL | StreamKeyModifiers.MASK_ALT
+        const CAS_MOD   = StreamKeyModifiers.MASK_CTRL | StreamKeyModifiers.MASK_ALT | StreamKeyModifiers.MASK_SHIFT
+
+        // 1. Press Ctrl → Sunshine: shortcutFlags |= CTRL
+        input.sendKey(true,  StreamKeys.VK_LCONTROL, 0)
+        // 2. Press Alt  → Sunshine: shortcutFlags |= ALT
+        input.sendKey(true,  StreamKeys.VK_LMENU, CTRL_MOD)
+        // 3. Press Shift → Sunshine: shortcutFlags |= SHIFT → shortcutFlags == SHORTCUT now
+        input.sendKey(true,  StreamKeys.VK_LSHIFT, CA_MOD)
+        // 4. Press N → Sunshine: shortcutFlags == SHORTCUT → apply_shortcut(N) → toggles display_cursor
+        input.sendKey(true,  StreamKeys.VK_KEY_N, CAS_MOD)
+        input.sendKey(false, StreamKeys.VK_KEY_N, CAS_MOD)
+        // 5. Release all modifiers
+        input.sendKey(false, StreamKeys.VK_LSHIFT,   CA_MOD)
+        input.sendKey(false, StreamKeys.VK_LMENU,    CTRL_MOD)
+        input.sendKey(false, StreamKeys.VK_LCONTROL, 0)
+
+        this.sunshineHideCursor = hide
     }
 
     // -- Fully immersed Fullscreen -> Fullscreen API + Pointer Lock
@@ -684,6 +833,34 @@ class ViewerApp implements Component {
             setSidebar(this.sidebar)
         }
     }
+    /**
+     * Inject or remove a global CSS rule `* { cursor: none !important }`.
+     *
+     * We only hide the cursor when ALL conditions are met:
+     * 1. rawInput mode is active
+     * 2. Pointer lock is active (browser already hides cursor in pointer lock,
+     *    but we inject the rule so the video cursor is the only one visible)
+     *
+     * When pointer lock is NOT active (sidebar open, menu, settings), the user
+     * needs to see the OS cursor to interact with the UI — so we always show it.
+     */
+    private updateGlobalCursorHide(rawInputActive: boolean) {
+        const shouldHide = rawInputActive && !!document.pointerLockElement
+        if (shouldHide) {
+            if (!this.cursorHideStyleEl) {
+                this.cursorHideStyleEl = document.createElement("style")
+                this.cursorHideStyleEl.id = "raw-input-cursor-hide"
+                this.cursorHideStyleEl.textContent = "* { cursor: none !important; }"
+                document.head.appendChild(this.cursorHideStyleEl)
+            }
+        } else {
+            if (this.cursorHideStyleEl) {
+                this.cursorHideStyleEl.remove()
+                this.cursorHideStyleEl = null
+            }
+        }
+    }
+
     private renderLocalTouchCursor() {
         const localCursorState = this.stream?.getInput().getLocalCursorState()
         if (!localCursorState?.visible) {
@@ -702,11 +879,19 @@ class ViewerApp implements Component {
         this.localTouchCursorDiv.style.top = `${rect.top + localCursorState.y * rect.height}px`
     }
 
+
     mount(parent: HTMLElement): void {
         parent.appendChild(this.div)
     }
     unmount(parent: HTMLElement): void {
         parent.removeChild(this.div)
+        // Clean up global DOM elements added outside this.div
+        this.rawPredictionCursorDiv.remove()
+        this.updateGlobalCursorHide(false)
+        // Restore cursor visibility on remote PC if we hid it
+        if (this.sunshineHideCursor) {
+            this.sendSunshineCursorHide(false)
+        }
     }
 
     getStreamRect(): DOMRect {
@@ -900,6 +1085,7 @@ class ViewerSidebar implements Component, Sidebar {
 
     private mouseMode: SelectComponent
     private touchMode: SelectComponent
+    private hideRemoteCursor: InputComponent
 
     constructor(app: ViewerApp) {
         this.app = app
@@ -1013,6 +1199,19 @@ class ViewerSidebar implements Component, Sidebar {
         })
         this.touchMode.addChangeListener(this.onTouchModeChange.bind(this))
         this.touchMode.mount(this.div)
+
+        // Hide Remote Cursor Toggle
+        this.hideRemoteCursor = new InputComponent("hideRemoteCursor", "checkbox", I.settings.hideRemoteCursor, {
+            checked: this.app.getInputConfig().hideRemoteCursor
+        })
+        this.hideRemoteCursor.addChangeListener(this.onHideRemoteCursorChange.bind(this))
+        this.hideRemoteCursor.mount(this.div)
+    }
+
+    private onHideRemoteCursorChange() {
+        const config = this.app.getInputConfig()
+        config.hideRemoteCursor = this.hideRemoteCursor.isChecked()
+        this.app.setInputConfig(config)
     }
 
     onCapabilitiesChange(capabilities: StreamCapabilities) {

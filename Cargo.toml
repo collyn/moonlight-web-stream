@@ -122,3 +122,8 @@ windows-sys = { version = "0.61.2", features = ["Win32_System_Console"] }
 
 [lints]
 workspace = true
+
+# Redirect moonlight-common to local fork so we can add cursor channel support.
+# The fork is at ./moonlight-common-rust — a clone of the upstream at the same rev.
+[patch."https://github.com/MrCreativ3001/moonlight-common-rust.git"]
+moonlight-common = { path = "moonlight-common-rust" }

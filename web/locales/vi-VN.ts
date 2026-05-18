@@ -97,6 +97,7 @@ export const viVN: Translations = {
         toggleFullscreenWithKeybind: "Bật/tắt toàn màn hình và khóa chuột bằng Ctrl + Shift + I",
         style: "Giao diện",
         useCustomDropdown: "Dùng danh sách thả tùy chỉnh",
+        hideRemoteCursor: "Ẩn con trỏ máy từ xa (Ctrl+Alt+Shift+N)",
     },
     addHost: {
         header: "Máy chủ",

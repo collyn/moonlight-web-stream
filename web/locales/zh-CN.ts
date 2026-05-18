@@ -97,6 +97,7 @@ export const zhCN: Translations = {
         toggleFullscreenWithKeybind: "按 Ctrl + Shift + I 切换全屏和鼠标锁定",
         style: "样式",
         useCustomDropdown: "使用自定义下拉框实现",
+        hideRemoteCursor: "隐藏远程鼠标 (Ctrl+Alt+Shift+N)",
     },
     addHost: {
         header: "主机",

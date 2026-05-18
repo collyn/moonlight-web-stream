@@ -97,6 +97,7 @@ export const koKR: Translations = {
         toggleFullscreenWithKeybind: "Ctrl + Shift + I로 전체 화면 및 마우스 가두기 전환",
         style: "스타일",
         useCustomDropdown: "사용자 정의 드롭다운 구현 사용",
+        hideRemoteCursor: "원격 커서 숨기기 (Ctrl+Alt+Shift+N)",
     },
     addHost: {
         header: "호스트 추가",

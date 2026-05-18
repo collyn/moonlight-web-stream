@@ -34,6 +34,7 @@ export type Settings = {
     pageStyle: PageStyle
     hdr: boolean
     useSelectElementPolyfill: boolean
+    hideRemoteCursor: boolean
 }
 
 export type StreamCodec = "h264" | "auto" | "h265" | "av1"
@@ -188,6 +189,7 @@ export class StreamSettingsComponent implements Component {
     private mouseMode: SelectComponent
     private touchMode: SelectComponent
     private localCursorSensitivity: InputComponent
+    private hideRemoteCursor: InputComponent
 
     private controllerInvertAB: InputComponent
     private controllerInvertXY: InputComponent
@@ -449,6 +451,12 @@ export class StreamSettingsComponent implements Component {
         this.localCursorSensitivity.addChangeListener(this.onSettingsChange.bind(this))
         this.localCursorSensitivity.mount(inputGroup.content)
 
+        this.hideRemoteCursor = new InputComponent("hideRemoteCursor", "checkbox", i.hideRemoteCursor, {
+            checked: settings?.hideRemoteCursor ?? defaultSettings_.hideRemoteCursor
+        })
+        this.hideRemoteCursor.addChangeListener(this.onSettingsChange.bind(this))
+        this.hideRemoteCursor.mount(inputGroup.content)
+
         // ---- Gamepad Settings Group ----
         const gamepadGroup = createSettingsGroup(i.gamepadSettings)
         rightColumn.appendChild(gamepadGroup.group)
@@ -647,6 +655,7 @@ export class StreamSettingsComponent implements Component {
         settings.mouseMode = this.mouseMode.getValue() as MouseMode
         settings.touchMode = this.touchMode.getValue() as TouchMode
         settings.localCursorSensitivity = parseFloat(this.localCursorSensitivity.getValue())
+        settings.hideRemoteCursor = this.hideRemoteCursor.isChecked()
 
         settings.controllerConfig.invertAB = this.controllerInvertAB.isChecked()
         settings.controllerConfig.invertXY = this.controllerInvertXY.isChecked()
