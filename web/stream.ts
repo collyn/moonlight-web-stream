@@ -499,9 +499,9 @@ class ViewerApp implements Component {
         await showModal(new AutoFullscreenModal(this.requestFullscreen.bind(this)))
     }
     async requestFullscreen() {
-        const body = document.body
-        if (body) {
-                if (!("requestFullscreen" in body && typeof body.requestFullscreen == "function")) {
+        const target = document.documentElement
+        if (target) {
+                if (!("requestFullscreen" in target && typeof target.requestFullscreen == "function")) {
                 await showMessage(I.stream.fullscreenUnsupported)
 
                 return
@@ -511,7 +511,7 @@ class ViewerApp implements Component {
 
             if (!this.isFullscreen()) {
                 try {
-                    await body.requestFullscreen({
+                    await target.requestFullscreen({
                         navigationUI: "hide"
                     })
                 } catch (e) {

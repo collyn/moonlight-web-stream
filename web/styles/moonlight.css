@@ -53,6 +53,16 @@ body.stream {
     padding: 0;
 }
 
+html.stream:fullscreen,
+html.stream:-webkit-full-screen {
+    height: 100vh;
+}
+
+html.stream:fullscreen body.stream,
+html.stream:-webkit-full-screen body.stream {
+    height: 100vh;
+}
+
 h2,
 h3 {
     margin-top: 12px;
