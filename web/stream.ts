@@ -330,6 +330,12 @@ class ViewerApp implements Component {
 
         this.stream?.getInput().setConfig(this.inputConfig)
         this.renderLocalTouchCursor()
+
+        if (this.inputConfig.mouseMode === "rawInput") {
+            this.div.style.cursor = "none"
+        } else {
+            this.div.style.cursor = ""
+        }
     }
 
     // Keyboard

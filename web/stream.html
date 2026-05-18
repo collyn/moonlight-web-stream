@@ -71,6 +71,12 @@
                 }
             });
 
+            // Make sure to update the height when entering/exiting fullscreen on desktop
+            // because innerWidth might not change if the browser was already maximized.
+            document.addEventListener('fullscreenchange', function() {
+                updateVh();
+            });
+
             // When the visual viewport resizes (keyboard open/close), keep the page at
             // original height and prevent scroll offset caused by keyboard focus.
             if (window.visualViewport) {
