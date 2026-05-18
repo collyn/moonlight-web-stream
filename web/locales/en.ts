@@ -28,6 +28,7 @@ export const en = {
         mouseMode: "Mouse Mode",
         touchMode: "Touch Mode",
         relative: "Relative",
+        rawInput: "Raw Input",
         follow: "Follow",
         pointAndDrag: "Point and Drag",
         touch: "Touch",

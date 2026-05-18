@@ -30,6 +30,7 @@ export const frFr: Translations = {
         mouseMode: "Mode souris",
         touchMode: "Mode tactile",
         relative: "Relative",
+        rawInput: "Raw Input",
         follow: "Suivre",
         pointAndDrag: "Pointer et glisser",
         touch: "Tactiel",

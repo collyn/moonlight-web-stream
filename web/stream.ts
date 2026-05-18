@@ -86,6 +86,7 @@ class ViewerApp implements Component {
 
     private inputConfig: StreamInputConfig = defaultStreamInputConfig()
     private previousMouseMode: MouseMode
+    private lastPointerRawUpdateMs = 0
     private autoEnterFullscreenOnStart: boolean = false
     private pendingAutoFullscreenPrompt: boolean = false
     private fullscreenPromptShown: boolean = false
@@ -224,14 +225,12 @@ class ViewerApp implements Component {
         element.addEventListener("mousedown", this.onMouseButtonDown.bind(this), { passive: false })
         element.addEventListener("mouseup", this.onMouseButtonUp.bind(this), { passive: false })
 
-        // Use pointerrawupdate for lowest-latency mouse tracking when available.
-        // It fires at hardware polling rate (up to 1000Hz) instead of being coalesced
-        // to ~60Hz like regular mousemove events.
-        if ('onpointerrawupdate' in window) {
-            (element as any).addEventListener('pointerrawupdate', this.onPointerRawUpdate.bind(this), { passive: false })
-        } else {
-            element.addEventListener("mousemove", this.onMouseMove.bind(this), { passive: false })
-        }
+        element.addEventListener("mousemove", this.onMouseMove.bind(this), { passive: false })
+        element.addEventListener("pointermove", this.onPointerMove.bind(this), { passive: false })
+
+        // Raw Input mode prefers pointerrawupdate. Browsers that do not support
+        // it simply never fire this event, so pointermove/mousemove remain fallback paths.
+        ;(element as any).addEventListener('pointerrawupdate', this.onPointerRawUpdate.bind(this), { passive: false })
 
         element.addEventListener("wheel", this.onMouseWheel.bind(this), { passive: false })
         element.addEventListener("contextmenu", this.onContextMenu.bind(this), { passive: false })
@@ -415,18 +414,58 @@ class ViewerApp implements Component {
         event.stopPropagation()
     }
     onMouseMove(event: MouseEvent) {
+        if (this.inputConfig.mouseMode == "rawInput" && "PointerEvent" in window) {
+            event.preventDefault()
+            event.stopPropagation()
+            return
+        }
+
         event.preventDefault()
         this.stream?.getInput().onMouseMove(event, this.getStreamRect())
 
         event.stopPropagation()
     }
+    onPointerMove(event: PointerEvent) {
+        if (this.inputConfig.mouseMode != "rawInput") {
+            return
+        }
+        if (event.pointerType !== 'mouse') {
+            return
+        }
+        if (performance.now() - this.lastPointerRawUpdateMs < 100) {
+            event.preventDefault()
+            event.stopPropagation()
+            return
+        }
+
+        event.preventDefault()
+        this.sendPointerMoveEvents(event)
+        event.stopPropagation()
+    }
     onPointerRawUpdate(event: PointerEvent) {
-        // pointerrawupdate fires at hardware rate — lowest latency path for mouse input.
+        if (this.inputConfig.mouseMode != "rawInput") {
+            return
+        }
+
+        // pointerrawupdate fires at hardware rate: lowest latency path for mouse input.
         // Only handle mouse pointer (not touch/pen which have their own handlers).
         if (event.pointerType !== 'mouse') return
+        this.lastPointerRawUpdateMs = performance.now()
         event.preventDefault()
         this.stream?.getInput().onMouseMove(event, this.getStreamRect())
         event.stopPropagation()
+    }
+    private sendPointerMoveEvents(event: PointerEvent) {
+        const rect = this.getStreamRect()
+        const events = typeof event.getCoalescedEvents == "function" ? event.getCoalescedEvents() : []
+        if (events.length == 0) {
+            this.stream?.getInput().onMouseMove(event, rect)
+            return
+        }
+
+        for (const coalescedEvent of events) {
+            this.stream?.getInput().onMouseMove(coalescedEvent, rect)
+        }
     }
     onMouseWheel(event: WheelEvent) {
         event.preventDefault()
@@ -528,7 +567,8 @@ class ViewerApp implements Component {
                 this.hasShownFullscreenEscapeWarning = true
             }
 
-            if (this.getStream()?.getInput().getConfig().mouseMode == "relative") {
+            const mouseMode = this.getStream()?.getInput().getConfig().mouseMode
+            if (mouseMode == "relative" || mouseMode == "rawInput") {
                 await this.requestPointerLock()
             }
 
@@ -564,15 +604,16 @@ class ViewerApp implements Component {
     }
 
     // Pointer Lock
-    async requestPointerLock(errorIfNotFound: boolean = false) {
+    async requestPointerLock(errorIfNotFound: boolean = false, mouseMode?: MouseMode) {
         this.previousMouseMode = this.inputConfig.mouseMode
+        const lockMouseMode = mouseMode ?? (this.inputConfig.mouseMode == "rawInput" ? "rawInput" : "relative")
 
         const inputElement = document.getElementById("input") as HTMLDivElement
 
         if (inputElement && "requestPointerLock" in inputElement && typeof inputElement.requestPointerLock == "function") {
             this.focusInput()
 
-            this.inputConfig.mouseMode = "relative"
+            this.inputConfig.mouseMode = lockMouseMode
             this.setInputConfig(this.inputConfig)
 
             setSidebarExtended(false)
@@ -587,9 +628,9 @@ class ViewerApp implements Component {
             document.addEventListener("pointerlockerror", onLockError, { once: true })
 
             try {
-                let promise = inputElement.requestPointerLock({
-                    unadjustedMovement: true
-                })
+                let promise = lockMouseMode == "rawInput"
+                    ? inputElement.requestPointerLock({ unadjustedMovement: true })
+                    : inputElement.requestPointerLock()
 
                 if (promise) {
                     await promise
@@ -623,6 +664,7 @@ class ViewerApp implements Component {
         if (!document.pointerLockElement) {
             this.inputConfig.mouseMode = this.previousMouseMode
             this.setInputConfig(this.inputConfig)
+            this.stream?.getInput().resetRawVirtualCursor()
         }
     }
 
@@ -879,7 +921,8 @@ class ViewerSidebar implements Component, Sidebar {
         // Pointer Lock
         this.lockMouseButton.innerText = I.stream.lockMouse
         this.lockMouseButton.addEventListener("click", async () => {
-            await this.app.requestPointerLock(true)
+            const mouseMode = this.mouseMode.getValue() as MouseMode
+            await this.app.requestPointerLock(true, mouseMode == "rawInput" ? "rawInput" : "relative")
         })
         this.buttonDiv.appendChild(this.lockMouseButton)
 
@@ -941,6 +984,7 @@ class ViewerSidebar implements Component, Sidebar {
         // Select Mouse Mode
         this.mouseMode = new SelectComponent("mouseMode", [
             { value: "relative", name: I.stream.relative },
+            { value: "rawInput", name: I.stream.rawInput },
             { value: "follow", name: I.stream.follow },
             { value: "localCursor", name: I.stream.localCursor },
             { value: "pointAndDrag", name: I.stream.pointAndDrag }
@@ -985,10 +1029,15 @@ class ViewerSidebar implements Component, Sidebar {
     }
 
     // -- Mouse Mode
-    private onMouseModeChange() {
+    private async onMouseModeChange() {
         const config = this.app.getInputConfig()
-        config.mouseMode = this.mouseMode.getValue() as any
+        const mouseMode = this.mouseMode.getValue() as MouseMode
+        config.mouseMode = mouseMode
         this.app.setInputConfig(config)
+
+        if (document.pointerLockElement && (mouseMode == "relative" || mouseMode == "rawInput")) {
+            await this.app.requestPointerLock(true, mouseMode)
+        }
     }
 
     // -- Touch Mode

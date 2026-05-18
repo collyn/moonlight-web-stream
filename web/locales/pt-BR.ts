@@ -30,6 +30,7 @@ export const ptBR: Translations = {
         mouseMode: "Modo do Mouse",
         touchMode: "Modo de Toque",
         relative: "Relativo",
+        rawInput: "Raw Input",
         follow: "Seguir",
         pointAndDrag: "Apontar e Arrastar",
         touch: "Toque",

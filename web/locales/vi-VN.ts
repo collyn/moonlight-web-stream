@@ -30,6 +30,7 @@ export const viVN: Translations = {
         mouseMode: "Chế độ chuột",
         touchMode: "Chế độ cảm ứng",
         relative: "Tương đối",
+        rawInput: "Raw Input",
         follow: "Theo dõi",
         pointAndDrag: "Chỉ và kéo",
         touch: "Cảm ứng",

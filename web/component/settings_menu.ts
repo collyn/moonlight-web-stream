@@ -396,6 +396,7 @@ export class StreamSettingsComponent implements Component {
         this.mouseMode = new SelectComponent("mouseMode",
             [
                 { value: "relative", name: streamI.relative },
+                { value: "rawInput", name: streamI.rawInput },
                 { value: "follow", name: streamI.follow },
                 { value: "localCursor", name: streamI.localCursor },
                 { value: "pointAndDrag", name: streamI.pointAndDrag }

@@ -30,6 +30,7 @@ export const zhCN: Translations = {
         mouseMode: "鼠标模式",
         touchMode: "触摸模式",
         relative: "相对模式",
+        rawInput: "Raw Input",
         follow: "跟随模式",
         pointAndDrag: "点击拖动",
         touch: "触摸",

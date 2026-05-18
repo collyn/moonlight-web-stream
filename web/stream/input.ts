@@ -25,6 +25,22 @@ const DOUBLE_TAP_FIRST_TAP_MAX_TIME_MS = 100
 const DOUBLE_TAP_SECOND_TAP_MAX_TIME_MS = 200
 
 const CONTROLLER_RUMBLE_INTERVAL_MS = 60
+const I16_MIN = -32768
+
+function clampI16(value: number): number {
+    if (!Number.isFinite(value)) {
+        return 0
+    }
+    return Math.min(Math.max(value, I16_MIN), I16_MAX)
+}
+
+function roundToNearestInt(value: number): number {
+    return value < 0 ? -Math.round(-value) : Math.round(value)
+}
+
+function clampRoundedI16(value: number): number {
+    return clampI16(roundToNearestInt(value))
+}
 
 function trySendChannel(channel: DataTransportChannel | null, buffer: ByteBuffer) {
     if (!channel) {
@@ -39,8 +55,21 @@ function trySendChannel(channel: DataTransportChannel | null, buffer: ByteBuffer
     channel.send(readBuffer.buffer)
 }
 
+function trySendLatestChannel(channel: DataTransportChannel | null, buffer: ByteBuffer, maxBufferedBytes: number) {
+    if (!channel) {
+        return
+    }
+
+    const estimatedBufferedBytes = channel.estimatedBufferedBytes()
+    if (estimatedBufferedBytes != null && estimatedBufferedBytes > maxBufferedBytes) {
+        return
+    }
+
+    trySendChannel(channel, buffer)
+}
+
 export type MouseScrollMode = "highres" | "normal"
-export type MouseMode = "relative" | "follow" | "localCursor" | "pointAndDrag"
+export type MouseMode = "relative" | "rawInput" | "follow" | "localCursor" | "pointAndDrag"
 export type TouchMode = "touch" | "mouseRelative" | "localCursor" | "pointAndDrag"
 
 export type StreamInputConfig = {
@@ -85,12 +114,15 @@ export class StreamInput {
     private mouseReliable: DataTransportChannel | null = null
     private mouseAbsolute: DataTransportChannel | null = null
     private mouseRelative: DataTransportChannel | null = null
+    private mouseRaw: DataTransportChannel | null = null
     private touch: DataTransportChannel | null = null
     private controllers: DataTransportChannel | null = null
     private controllerInputs: Array<DataTransportChannel | null> = []
 
     private touchSupported: boolean | null = null
     private localCursorPosition: [number, number] | null = null
+    private mouseMoveRemainder: [number, number] = [0, 0]
+    private rawMouseMoveRemainder: [number, number] = [0, 0]
 
     constructor(config?: StreamInputConfig) {
         this.config = defaultStreamInputConfig()
@@ -112,6 +144,7 @@ export class StreamInput {
         this.mouseReliable = this.getDataChannel(transport, TransportChannelId.MOUSE_RELIABLE)
         this.mouseAbsolute = this.getDataChannel(transport, TransportChannelId.MOUSE_ABSOLUTE)
         this.mouseRelative = this.getDataChannel(transport, TransportChannelId.MOUSE_RELATIVE)
+        this.mouseRaw = this.getDataChannel(transport, TransportChannelId.MOUSE_RAW)
 
         if (this.touch) {
             this.touch.removeReceiveListener(this.onTouchData.bind(this))
@@ -264,7 +297,7 @@ export class StreamInput {
             return
         }
 
-        if (this.config.mouseMode == "relative" || this.config.mouseMode == "follow") {
+        if (this.config.mouseMode == "relative" || this.config.mouseMode == "rawInput" || this.config.mouseMode == "follow") {
             this.sendMouseButton(true, button)
         } else if (this.config.mouseMode == "localCursor") {
             this.initializeLocalCursor(rect, event.clientX, event.clientY)
@@ -280,7 +313,7 @@ export class StreamInput {
             return
         }
 
-        if (this.config.mouseMode == "relative" || this.config.mouseMode == "follow" || this.config.mouseMode == "localCursor") {
+        if (this.config.mouseMode == "relative" || this.config.mouseMode == "rawInput" || this.config.mouseMode == "follow" || this.config.mouseMode == "localCursor") {
             this.sendMouseButton(false, button)
         } else if (this.config.mouseMode == "pointAndDrag") {
             this.sendMouseButton(false, button)
@@ -289,6 +322,8 @@ export class StreamInput {
     onMouseMove(event: MouseEvent, rect: DOMRect) {
         if (this.config.mouseMode == "relative") {
             this.sendMouseMoveClientCoordinates(event.movementX, event.movementY, rect)
+        } else if (this.config.mouseMode == "rawInput") {
+            this.sendRawMouseMoveClientCoordinates(event.movementX, event.movementY, event.clientX, event.clientY, rect)
         } else if (this.config.mouseMode == "follow") {
             this.sendMousePositionClientCoordinates(event.clientX, event.clientY, rect, false)
         } else if (this.config.mouseMode == "localCursor") {
@@ -310,28 +345,122 @@ export class StreamInput {
     }
 
     sendMouseMove(movementX: number, movementY: number) {
+        const [deltaX, deltaY] = this.quantizeMouseMove(movementX, movementY, this.mouseMoveRemainder)
+        if (deltaX == 0 && deltaY == 0) {
+            return
+        }
+
         this.buffer.reset()
 
         this.buffer.putU8(0)
-        this.buffer.putI16(movementX)
-        this.buffer.putI16(movementY)
+        this.buffer.putI16(deltaX)
+        this.buffer.putI16(deltaY)
 
         trySendChannel(this.mouseRelative, this.buffer)
     }
-    sendMouseMoveClientCoordinates(movementX: number, movementY: number, rect: DOMRect) {
-        const scaledMovementX = movementX / rect.width * this.streamerSize[0];
-        const scaledMovementY = movementY / rect.height * this.streamerSize[1];
+    private rawVirtualX: number = -1
+    private rawVirtualY: number = -1
 
-        this.sendMouseMove(scaledMovementX, scaledMovementY)
+    resetRawVirtualCursor() {
+        this.rawVirtualX = -1
+        this.rawVirtualY = -1
+    }
+
+    sendRawMouseMoveClientCoordinates(movementX: number, movementY: number, clientX: number, clientY: number, rect: DOMRect) {
+        // If Pointer Lock is NOT active, the local OS cursor is visible. 
+        // To make the remote cursor PERFECTLY OVERLAP the local cursor (like Follow mode),
+        // we must use the exact absolute coordinates (clientX/clientY).
+        if (!document.pointerLockElement) {
+            const relativeX = clientX - rect.x
+            const relativeY = clientY - rect.y
+            this.rawVirtualX = relativeX / rect.width * this.streamerSize[0]
+            this.rawVirtualY = relativeY / rect.height * this.streamerSize[1]
+        } else {
+            // If Pointer Lock IS active, the local cursor is hidden, and clientX/clientY are frozen.
+            // We must use movementX/Y (which contains raw hardware mickeys due to unadjustedMovement: true).
+            const scaledMovement = this.scaleMouseMoveClientCoordinates(movementX, movementY, rect)
+            if (!scaledMovement) {
+                return
+            }
+
+            if (this.rawVirtualX === -1) {
+                const relativeX = clientX - rect.x
+                const relativeY = clientY - rect.y
+                this.rawVirtualX = relativeX / rect.width * this.streamerSize[0]
+                this.rawVirtualY = relativeY / rect.height * this.streamerSize[1]
+            }
+
+            this.rawVirtualX += scaledMovement[0] * this.config.localCursorSensitivity
+            this.rawVirtualY += scaledMovement[1] * this.config.localCursorSensitivity
+        }
+
+        // Clamp virtual cursor to screen bounds
+        this.rawVirtualX = Math.max(0, Math.min(this.streamerSize[0], this.rawVirtualX))
+        this.rawVirtualY = Math.max(0, Math.min(this.streamerSize[1], this.rawVirtualY))
+
+        this.sendRawMousePosition(Math.round(this.rawVirtualX), Math.round(this.rawVirtualY))
+    }
+
+    sendRawMousePosition(x: number, y: number) {
+        const PACKET_SIZE = 1 + 2 + 2 + 2 + 2;
+
+        const estimatedBufferedBytes = this.mouseRaw?.estimatedBufferedBytes()
+        if (this.mouseRaw && estimatedBufferedBytes != null && estimatedBufferedBytes > PACKET_SIZE) {
+            // Because we are sending absolute coordinates, it is perfectly safe to drop packets.
+            // The next packet will contain the latest absolute position.
+            return
+        }
+
+        this.buffer.reset()
+        this.buffer.putU8(1) // type 1 = MousePosition
+        this.buffer.putI16(x)
+        this.buffer.putI16(y)
+        this.buffer.putI16(this.streamerSize[0])
+        this.buffer.putI16(this.streamerSize[1])
+
+        trySendChannel(this.mouseRaw, this.buffer)
+    }
+    sendMouseMoveClientCoordinates(movementX: number, movementY: number, rect: DOMRect) {
+        const scaledMovement = this.scaleMouseMoveClientCoordinates(movementX, movementY, rect)
+        if (!scaledMovement) {
+            return
+        }
+
+        this.sendMouseMove(scaledMovement[0], scaledMovement[1])
+    }
+
+    private quantizeMouseMove(movementX: number, movementY: number, remainder: [number, number]): [number, number] {
+        return [
+            this.quantizeMouseMoveAxis(movementX, remainder, 0),
+            this.quantizeMouseMoveAxis(movementY, remainder, 1),
+        ]
+    }
+    private quantizeMouseMoveAxis(value: number, remainder: [number, number], axis: 0 | 1): number {
+        const total = (Number.isFinite(value) ? value : 0) + remainder[axis]
+        const rounded = roundToNearestInt(total)
+        const clamped = clampI16(rounded)
+        remainder[axis] = rounded == clamped ? total - clamped : 0
+        return clamped
+    }
+
+    private scaleMouseMoveClientCoordinates(movementX: number, movementY: number, rect: DOMRect): [number, number] | null {
+        if (this.streamerSize[0] <= 0 || this.streamerSize[1] <= 0 || rect.width <= 0 || rect.height <= 0) {
+            return null
+        }
+
+        return [
+            movementX / rect.width * this.streamerSize[0],
+            movementY / rect.height * this.streamerSize[1],
+        ]
     }
     sendMousePosition(x: number, y: number, referenceWidth: number, referenceHeight: number, reliable: boolean) {
         this.buffer.reset()
 
         this.buffer.putU8(1)
-        this.buffer.putI16(x)
-        this.buffer.putI16(y)
-        this.buffer.putI16(referenceWidth)
-        this.buffer.putI16(referenceHeight)
+        this.buffer.putI16(clampRoundedI16(x))
+        this.buffer.putI16(clampRoundedI16(y))
+        this.buffer.putI16(clampRoundedI16(referenceWidth))
+        this.buffer.putI16(clampRoundedI16(referenceHeight))
 
         if (reliable) {
             trySendChannel(this.mouseReliable, this.buffer)
@@ -818,7 +947,7 @@ export class StreamInput {
                             // mouse relative:
                             // - when having moved the mouse we shouldn't allow a click
                             // - when it's maybe a double click we shouldn't do a click
-                            !(this.config.mouseMode == "relative" && !oldTouch.mouseMoved) &&
+                            !((this.config.mouseMode == "relative" || this.config.mouseMode == "rawInput") && !oldTouch.mouseMoved) &&
                             !maybeDoubleTap
                         ) {
                             // Should we right or left click?

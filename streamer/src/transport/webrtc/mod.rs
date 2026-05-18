@@ -24,7 +24,7 @@ use tokio::{
     spawn,
     sync::{
         Mutex,
-        mpsc::{Receiver, Sender, channel},
+        mpsc::{Receiver, Sender, channel, error::TrySendError},
     },
     time::sleep,
 };
@@ -189,6 +189,7 @@ pub async fn new(
             ("mouse_reliable", Options { reliable: true , ordered: true  }),
             ("mouse_absolute", Options { reliable: false, ordered: false }),
             ("mouse_relative", Options { reliable: true , ordered: false }),
+            ("mouse_raw",      Options { reliable: false, ordered: false }),
             ("keyboard",       Options { reliable: true , ordered: true  }),
             ("touch",          Options { reliable: true , ordered: true  }),
             ("controllers",    Options { reliable: true , ordered: true  }),
@@ -311,6 +312,16 @@ fn create_channel_message_handler(
         let Some(packet) = InboundPacket::deserialize(channel, &message.data) else {
             return;
         };
+
+        if channel.0 == TransportChannelId::MOUSE_RAW {
+            match inner.event_sender.try_send(TransportEvent::RecvPacket(packet)) {
+                Ok(()) | Err(TrySendError::Full(_)) => {}
+                Err(TrySendError::Closed(_)) => {
+                    warn!("Failed to dispatch raw mouse packet because the event channel is closed");
+                }
+            }
+            return;
+        }
 
         if let Err(err) = inner
             .event_sender
@@ -506,10 +517,15 @@ impl WebRtcInner {
                     TransportChannel(TransportChannelId::GENERAL),
                 ));
             }
-            "mouse_reliable" | "mouse_absolute" | "mouse_relative" => {
+            "mouse_reliable" | "mouse_absolute" | "mouse_relative" | "mouse_raw" => {
                 channel.on_message(create_channel_message_handler(
                     inner,
-                    TransportChannel(TransportChannelId::MOUSE_ABSOLUTE),
+                    TransportChannel(match label {
+                        "mouse_reliable" => TransportChannelId::MOUSE_RELIABLE,
+                        "mouse_relative" => TransportChannelId::MOUSE_RELATIVE,
+                        "mouse_raw" => TransportChannelId::MOUSE_RAW,
+                        _ => TransportChannelId::MOUSE_ABSOLUTE,
+                    }),
                 ));
             }
             "touch" => {

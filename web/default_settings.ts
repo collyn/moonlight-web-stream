@@ -27,7 +27,7 @@ const trueDefaultSettings: Settings =
     "audioSampleQueueSize": 20,
     // possible values: "highres", "normal"
     "mouseScrollMode": "highres",
-    // possible values: "relative", "follow", "pointAndDrag"
+    // possible values: "relative", "rawInput", "follow", "localCursor", "pointAndDrag"
     "mouseMode": "follow",
     // possible values: "touch", "mouseRelative", "localCursor", "pointAndDrag"
     "touchMode": "mouseRelative",

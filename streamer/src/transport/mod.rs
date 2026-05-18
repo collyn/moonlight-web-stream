@@ -188,7 +188,8 @@ impl InboundPacket {
             TransportChannel(
                 TransportChannelId::MOUSE_ABSOLUTE
                 | TransportChannelId::MOUSE_RELIABLE
-                | TransportChannelId::MOUSE_RELATIVE,
+                | TransportChannelId::MOUSE_RELATIVE
+                | TransportChannelId::MOUSE_RAW,
             ) => {
                 if buffer.remaining() < 1 {
                     warn!("[InboudPacket]: failed to read mouse message");

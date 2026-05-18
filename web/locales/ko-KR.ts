@@ -30,6 +30,7 @@ export const koKR: Translations = {
         mouseMode: "마우스 모드",
         touchMode: "터치 모드",
         relative: "상대 좌표",
+        rawInput: "Raw Input",
         follow: "트래킹",
         pointAndDrag: "포인트 및 드래그",
         touch: "터치",
